@@ -39,6 +39,23 @@ def show_outcome(outcome: RuleOutcome, reasons: list[str]) -> None:
     getattr(st, level)(message)
 
 
+def format_activity_event(event: dict) -> str:
+    dates = f"{event['start_date']} → {event['end_date']}"
+    action = event["action"]
+    if action.startswith("created:"):
+        outcome_label = {"approved": "auto-approved", "pending": "pending review"}.get(
+            action.split(":", 1)[1], action.split(":", 1)[1]
+        )
+        return f"**{event['owner_name']}** submitted a request for {dates} ({outcome_label})"
+    if action.startswith("status_changed:"):
+        new_status = action.split(":", 1)[1]
+        if new_status == "cancelled":
+            return f"**{event['actor_name']}** cancelled the request for {dates}"
+        verb = {"approved": "approved", "denied": "denied"}.get(new_status, new_status)
+        return f"**{event['actor_name']}** {verb} **{event['owner_name']}**'s request for {dates}"
+    return f"**{event['actor_name']}** — {action} — {dates}"
+
+
 # -- sidebar: simulated login -------------------------------------------------
 
 users = storage.get_users()
@@ -54,6 +71,7 @@ tab_names = ["Request Time Off", "Team Calendar"]
 if current_user.role in (Role.LEADER, Role.ADMIN):
     tab_names.insert(1, "Team Review")
     tab_names.insert(2, "Team Rules")
+tab_names.append("Activity")
 tabs = st.tabs(tab_names)
 tab_map = dict(zip(tab_names, tabs))
 
@@ -234,3 +252,15 @@ with tab_map["Team Calendar"]:
             for r in visible
         ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+# -- Activity --------------------------------------------------------------------
+
+with tab_map["Activity"]:
+    st.subheader("Recent team activity")
+    events = storage.get_team_activity(TEAM_ID, limit=30)
+    if not events:
+        st.write("No activity yet.")
+    else:
+        for event in events:
+            st.write(f"{event['timestamp']:%Y-%m-%d %H:%M} — {format_activity_event(event)}")

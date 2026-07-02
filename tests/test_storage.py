@@ -100,3 +100,25 @@ def test_add_and_remove_blackout_rule(storage):
     storage.delete_rule(new_rule.id)
     after_delete = [r for r in storage.get_rules(team_id=1) if r.type == "blackout_period"]
     assert len(after_delete) == before
+
+
+def test_team_activity_records_lifecycle(storage):
+    req = storage.create_request(
+        user_id=2,
+        absence_type_id=1,
+        start_date=date(2026, 8, 3),
+        end_date=date(2026, 8, 5),
+        note="",
+        outcome=RuleOutcome.NEEDS_REVIEW,
+        reasons=["ok"],
+    )
+    storage.update_request_status(req.id, RequestStatus.APPROVED, actor_id=1)
+
+    events = storage.get_team_activity(team_id=1)
+
+    assert len(events) == 2
+    # newest first
+    assert events[0]["action"] == "status_changed:approved"
+    assert events[0]["actor_name"] == "Alice Chen"
+    assert events[0]["owner_name"] == "Bob Ibrahim"
+    assert events[1]["action"] == "created:pending"

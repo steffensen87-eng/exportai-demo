@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     entity TEXT NOT NULL,
     action TEXT NOT NULL,
     actor_id INTEGER NOT NULL,
+    request_id INTEGER,
     timestamp TEXT NOT NULL,
     detail TEXT NOT NULL DEFAULT ''
 );
@@ -271,8 +272,8 @@ class Storage:
             )
             request_id = cur.lastrowid
             conn.execute(
-                "INSERT INTO audit_log (entity, action, actor_id, timestamp, detail) VALUES (?, ?, ?, ?, ?)",
-                ("AbsenceRequest", f"created:{status.value}", user_id, now.isoformat(), "; ".join(reasons)),
+                "INSERT INTO audit_log (entity, action, actor_id, request_id, timestamp, detail) VALUES (?, ?, ?, ?, ?, ?)",
+                ("AbsenceRequest", f"created:{status.value}", user_id, request_id, now.isoformat(), "; ".join(reasons)),
             )
             conn.commit()
         return self.get_request(request_id)
@@ -289,10 +290,41 @@ class Storage:
                 "UPDATE absence_requests SET status = ? WHERE id = ?", (status.value, request_id)
             )
             conn.execute(
-                "INSERT INTO audit_log (entity, action, actor_id, timestamp, detail) VALUES (?, ?, ?, ?, ?)",
-                ("AbsenceRequest", f"status_changed:{status.value}", actor_id, now.isoformat(), f"request_id={request_id}"),
+                "INSERT INTO audit_log (entity, action, actor_id, request_id, timestamp, detail) VALUES (?, ?, ?, ?, ?, ?)",
+                ("AbsenceRequest", f"status_changed:{status.value}", actor_id, request_id, now.isoformat(), ""),
             )
             conn.commit()
+
+    def get_team_activity(self, team_id: int, limit: int = 30) -> list[dict]:
+        query = """
+            SELECT
+                al.action, al.actor_id, al.timestamp, al.detail,
+                ar.user_id AS owner_id, ar.start_date, ar.end_date
+            FROM audit_log al
+            JOIN absence_requests ar ON ar.id = al.request_id
+            JOIN users u ON u.id = ar.user_id
+            WHERE u.team_id = ?
+            ORDER BY al.timestamp DESC
+            LIMIT ?
+        """
+        with self._connect() as conn:
+            rows = conn.execute(query, (team_id, limit)).fetchall()
+            events = []
+            for r in rows:
+                actor = self.get_user(r["actor_id"])
+                owner = self.get_user(r["owner_id"])
+                events.append(
+                    {
+                        "timestamp": datetime.fromisoformat(r["timestamp"]),
+                        "actor_name": actor.name,
+                        "owner_name": owner.name,
+                        "action": r["action"],
+                        "start_date": date.fromisoformat(r["start_date"]),
+                        "end_date": date.fromisoformat(r["end_date"]),
+                        "detail": r["detail"],
+                    }
+                )
+            return events
 
     def cancel_request(self, request_id: int, user_id: int) -> None:
         request = self.get_request(request_id)
