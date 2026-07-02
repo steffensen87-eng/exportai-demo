@@ -259,6 +259,14 @@ class Storage:
             )
             conn.commit()
 
+    def cancel_request(self, request_id: int, user_id: int) -> None:
+        request = self.get_request(request_id)
+        if request.user_id != user_id:
+            raise PermissionError("Only the requester can cancel their own request")
+        if request.status not in (RequestStatus.PENDING, RequestStatus.APPROVED):
+            raise ValueError(f"Cannot cancel a request with status '{request.status.value}'")
+        self.update_request_status(request_id, RequestStatus.CANCELLED, user_id)
+
 
 def _decode_config(rule_type: str, raw_config: str) -> dict:
     config = json.loads(raw_config)

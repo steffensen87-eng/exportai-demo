@@ -107,17 +107,18 @@ with tab_map["Request Time Off"]:
     if not my_requests:
         st.write("No requests yet.")
     else:
-        rows = [
-            {
-                "Start": r.start_date,
-                "End": r.end_date,
-                "Status": STATUS_LABEL[r.status],
-                "Rule outcome": r.outcome.value.replace("_", " ").title() if r.outcome else "",
-                "Details": "; ".join(r.reasons),
-            }
-            for r in reversed(my_requests)
-        ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        for r in reversed(my_requests):
+            with st.container(border=True):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.markdown(f"**{r.start_date} → {r.end_date}** · {STATUS_LABEL[r.status]}")
+                    if r.outcome:
+                        st.caption(f"{r.outcome.value.replace('_', ' ').title()} — " + "; ".join(r.reasons))
+                with col2:
+                    if r.status in (RequestStatus.PENDING, RequestStatus.APPROVED):
+                        if st.button("Cancel", key=f"cancel_{r.id}"):
+                            storage.cancel_request(r.id, current_user.id)
+                            st.rerun()
 
 
 # -- Team Review (leader/admin only) ------------------------------------------
