@@ -170,6 +170,41 @@ class Storage:
                 for r in rows
             ]
 
+    def upsert_single_rule(self, team_id: int, rule_type: str, config: dict) -> Rule:
+        """Create or update the one rule of `rule_type` for a team (coverage / max-concurrent)."""
+        encoded = _encode_config(rule_type, config)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM rules WHERE team_id = ? AND type = ?", (team_id, rule_type)
+            ).fetchone()
+            if row:
+                conn.execute("UPDATE rules SET config = ? WHERE id = ?", (json.dumps(encoded), row["id"]))
+                rule_id = row["id"]
+            else:
+                cur = conn.execute(
+                    "INSERT INTO rules (team_id, type, config) VALUES (?, ?, ?)",
+                    (team_id, rule_type, json.dumps(encoded)),
+                )
+                rule_id = cur.lastrowid
+            conn.commit()
+        return Rule(id=rule_id, team_id=team_id, type=rule_type, config=config)
+
+    def add_blackout_rule(self, team_id: int, start: date, end: date, label: str) -> Rule:
+        config = {"start": start.isoformat(), "end": end.isoformat(), "label": label}
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO rules (team_id, type, config) VALUES (?, 'blackout_period', ?)",
+                (team_id, json.dumps(config)),
+            )
+            rule_id = cur.lastrowid
+            conn.commit()
+        return Rule(id=rule_id, team_id=team_id, type="blackout_period", config={"start": start, "end": end, "label": label})
+
+    def delete_rule(self, rule_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+            conn.commit()
+
     def get_absence_types(self) -> list[AbsenceType]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM absence_types ORDER BY id").fetchall()
@@ -273,6 +308,15 @@ def _decode_config(rule_type: str, raw_config: str) -> dict:
     if rule_type == "blackout_period":
         config["start"] = date.fromisoformat(config["start"])
         config["end"] = date.fromisoformat(config["end"])
+    return config
+
+
+def _encode_config(rule_type: str, config: dict) -> dict:
+    if rule_type == "blackout_period":
+        encoded = dict(config)
+        encoded["start"] = config["start"].isoformat() if isinstance(config["start"], date) else config["start"]
+        encoded["end"] = config["end"].isoformat() if isinstance(config["end"], date) else config["end"]
+        return encoded
     return config
 
 

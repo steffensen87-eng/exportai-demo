@@ -53,6 +53,7 @@ st.caption("Warehouse Ops · Northwind Logistics")
 tab_names = ["Request Time Off", "Team Calendar"]
 if current_user.role in (Role.LEADER, Role.ADMIN):
     tab_names.insert(1, "Team Review")
+    tab_names.insert(2, "Team Rules")
 tabs = st.tabs(tab_names)
 tab_map = dict(zip(tab_names, tabs))
 
@@ -146,6 +147,66 @@ if "Team Review" in tab_map:
                 if col2.button("Deny", key=f"deny_{req.id}"):
                     storage.update_request_status(req.id, RequestStatus.DENIED, current_user.id)
                     st.rerun()
+
+
+# -- Team Rules (leader/admin only) -------------------------------------------
+
+if "Team Rules" in tab_map:
+    with tab_map["Team Rules"]:
+        team_rules = storage.get_rules(TEAM_ID)
+        coverage_rule = next((r for r in team_rules if r.type == "min_coverage"), None)
+        concurrent_rule = next((r for r in team_rules if r.type == "max_concurrent_absences"), None)
+        blackout_rules = [r for r in team_rules if r.type == "blackout_period"]
+
+        st.subheader("Coverage & concurrency")
+        with st.form("coverage_rule_form"):
+            min_pct = st.slider(
+                "Minimum team coverage (%)",
+                min_value=0,
+                max_value=100,
+                value=int(round((coverage_rule.config["min_coverage_pct"] if coverage_rule else 0.6) * 100)),
+                help="If a request would drop coverage below this on any day, it's flagged for review.",
+            )
+            max_concurrent = st.number_input(
+                "Max concurrent absences",
+                min_value=1,
+                max_value=max(len(team_members), 1),
+                value=concurrent_rule.config["max_concurrent"] if concurrent_rule else 2,
+                help="A request that would exceed this is blocked outright.",
+            )
+            save_coverage = st.form_submit_button("Save")
+        if save_coverage:
+            storage.upsert_single_rule(TEAM_ID, "min_coverage", {"min_coverage_pct": min_pct / 100})
+            storage.upsert_single_rule(TEAM_ID, "max_concurrent_absences", {"max_concurrent": int(max_concurrent)})
+            st.success("Rules updated.")
+            st.rerun()
+
+        st.subheader("Blackout periods")
+        if not blackout_rules:
+            st.write("No blackout periods configured.")
+        for r in blackout_rules:
+            with st.container(border=True):
+                bcol1, bcol2 = st.columns([4, 1])
+                bcol1.markdown(f"**{r.config['label']}** · {r.config['start']} → {r.config['end']}")
+                if bcol2.button("Remove", key=f"remove_blackout_{r.id}"):
+                    storage.delete_rule(r.id)
+                    st.rerun()
+
+        with st.form("new_blackout_form"):
+            st.write("Add a blackout period")
+            label = st.text_input("Label")
+            bcol1, bcol2 = st.columns(2)
+            b_start = bcol1.date_input("Start", value=date.today(), key="blackout_start")
+            b_end = bcol2.date_input("End", value=date.today() + timedelta(days=7), key="blackout_end")
+            add_blackout = st.form_submit_button("Add blackout period")
+        if add_blackout:
+            if b_end < b_start:
+                st.error("End date must be on or after the start date.")
+            elif not label:
+                st.error("Label is required.")
+            else:
+                storage.add_blackout_rule(TEAM_ID, b_start, b_end, label)
+                st.rerun()
 
 
 # -- Team Calendar --------------------------------------------------------------

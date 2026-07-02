@@ -74,3 +74,29 @@ def test_cancelled_request_excluded_from_approved_list(storage):
     storage.cancel_request(req.id, user_id=2)
 
     assert len(storage.list_requests(status=RequestStatus.APPROVED)) == 0
+
+
+def test_upsert_single_rule_creates_then_updates(storage):
+    rules = storage.get_rules(team_id=1)
+    coverage_rule = next(r for r in rules if r.type == "min_coverage")
+    assert coverage_rule.config["min_coverage_pct"] == 0.6
+
+    storage.upsert_single_rule(1, "min_coverage", {"min_coverage_pct": 0.8})
+
+    rules = storage.get_rules(team_id=1)
+    updated = [r for r in rules if r.type == "min_coverage"]
+    assert len(updated) == 1
+    assert updated[0].config["min_coverage_pct"] == 0.8
+
+
+def test_add_and_remove_blackout_rule(storage):
+    before = len([r for r in storage.get_rules(team_id=1) if r.type == "blackout_period"])
+
+    new_rule = storage.add_blackout_rule(1, date(2026, 9, 1), date(2026, 9, 5), "Inventory count")
+    after_add = [r for r in storage.get_rules(team_id=1) if r.type == "blackout_period"]
+    assert len(after_add) == before + 1
+    assert any(r.config["label"] == "Inventory count" for r in after_add)
+
+    storage.delete_rule(new_rule.id)
+    after_delete = [r for r in storage.get_rules(team_id=1) if r.type == "blackout_period"]
+    assert len(after_delete) == before
